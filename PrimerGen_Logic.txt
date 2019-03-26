@@ -1,0 +1,292 @@
+Samuel Moijueh
+July 2016
+
+Program description for PrimerGen_testing_copy.py
+
+QUICK GLANCE
+
+>$ python 3_PrimerGen.py -p 2-18_InSilico_PrimerDesign -i AlamutFile_1.bed -t 1_1000G.vcf
+
+============ Program Basics ============
+
+SYNOPSIS: This program was written in python for the purpose of in-silico primer design.
+The purpose the program is to select primers pairs for a given list of gene and exon sequences
+specified in a separate BED file (see INPUT FILES). It reads the
+nucleotide sequence of each exon from the BED file, and then proceeds to do the following:
+
+a) uses Primer3 to identify all viable primer pairs from the DNA sequence.
+b) uses BLAT to filter out primer pairs that have homology in the human genome; we
+want to select primers that hybridize and bind to a unique region in the human genome.
+c) filters out primer pairs that overlap a thousand genome variant
+d) selects a primer pair that meets all of the requirements for excellent binding
+(see PRIMER PAIR REQUIREMENTS)
+
+What are primers used for and how do they work?
+
+In PCR, primers are used to select and target the DNA fragment to be amplified by PCR. The length
+of primers is usually not more than 30 (usually 18–24) nucleotides, and they need to match the
+beginning and the end of the DNA fragment to be amplified. They direct replication towards one
+another – the extension of one primer by polymerase then becomes the template for the other, leading
+to an exponential increase in the target segment.
+
+The Das lab uses Primers for PCR.
+
+INPUT FILES:
+
+1. Thousand Genome Variant Calling Format file (VCF) for the Human Genome
+
+This is VCF file lists all the SNP and other variants contained in the human genome. This is
+huge file.
+
+This file can be downloaded from a human genome FTP site.
+
+2. AlamutFile.bed
+
+This is a BED file with the genes and their nucleotide sequences of the exons we wish to
+target and amplify.
+
+DEPENDENCIES:
+
+The program requires the following python modules:
+
+import sys
+import re
+import time
+import random
+from decimal import *
+import sys
+import os
+import subprocess
+import fileinput
+from optparse import OptionParser
+from random import randint
+from subprocess import call
+
+Tools:
+Primer3
+BLAT
+
+HOW TO INVOKE/RUN PROGRAM:
+
+After you have specifed in the program the paths of the alamut file and the query text file, you can enter the
+following command:
+
+This program is the fourth module of a pipeline. The third module, which initializes the directory structure and
+creates the job scripts which invokes this program, needs to run in before we can create the primers.
+
+Once the job scripts are created, we submit them on the cluster and wait. The job scripts will correctly invoke
+the program. This scripts must be run on the server because of the program dependencies to Primer3 and BLAT.
+
+>$ python revised_PrimerGen.py -p 2-18_InSilico_PrimerDesign -i AlamutFile_1.bed -t 1_1000G.vcf
+
+Program parameters:
+-p the path to the directory where the output is to be saved.
+-i the path to the AlamutFile BED fue=
+-t the path to the ThousandGenomes Variant file
+
+This program creates a bunch of primer pairs and identifies the one that satisfies all the requirements for a
+good primer pair.
+
+============ PROGRAM LOGIC ============
+The section describes in detail how the program works.
+
+The program first initializes the global parameters; these variables are defined at the command line before the
+program is run. If the user fails to define all of the parameters or these files do not exist, the program will
+display a prompt on how to run the program.
+
+Next, the constants are defined. The SEQUENCE_MAX_LENGTH is 400; that's how many base pairs of the exon we're
+targetting. The SEQUENCE_BUFFER is 320; that's how many base pairs we're extending to capture the exon
+sequence.
+
+ThousandGenomeDict() is the dictionary where we store the 1000 Genome variants; the KEY is a string of the
+'Chromosome;Genomic Position' and the VALUE is a placeholder (1).
+
+SeqFileNumber is the number of the AlamutFile.bed that we're creating primers for. This variable is needed to keep
+track of which BED file we're creating primers for.
+
+Next the file handles are opened
+-> Job<SeqFileNumber>_Timelog.txt: this file shows how long each function of the program took. Helpful for identify bottlenecks during execution.
+-> Job<SeqFileNumber>_PrimerGenLog.txt: this file shows all primer pairs identified by Primer3 for each exon, and the algorithm used to
+select the primer pair.
+-> Job<SeqFileNumber>_primers.txt: displays the primer pair selected for exon.
+-> Job<SeqFileNumber>__notFound_output.txt: this file shows exon sequences PrimerGen.py was not able to identify primers pairs for.
+
+The program is divided into 7 main functions that essentially selects the primer pair for each exon:
+
+1. main()
+2. LoadThousandGenomeFile()
+3. GeneratePrimers()
+4. BLATCheck()
+5. GetPrimersfromPrimer3Output()
+6. prepareInputFileforPrimer3()
+7. callPrimer3()
+
+And several helper functions for selecting the primer pair for each exon:
+
+1. GCcontent()
+2. complement()
+3. revcom()
+4. CheckThousandG()
+5. CheckGCandProdSize()
+6. PrepareBLATFile()
+
+For the purposes of a general overview, let's cover the helper function first:
+
+*****************************
+****   HELPER FUNCTIONS  ****
+*****************************
+
+======== GCcontent() ========
+This is a relatively straight-forward function. It returns the GC content in the primer sequence as
+a percentage. The significance of this will be apparent in the CheckGCandProdSize() helper function.
+
+
+======== complement() ========
+This helper function returns the complement of the genomic sequence.
+
+
+======== revcom() ========
+This helper function returns the reverse complement of the genomic sequence. This is
+
+
+======== CheckThousandG() ========
+This helper function checks each genomic position of a primer pair. If either primer (left or right)
+has a thousand genome variant overlapping it's genomic position then it return 0, if not
+it returns 1.
+
+======== CheckGCandProdSize() ========
+This helper function checks genomic content of the primer pairs. If the GC content of both
+the left and right primers is less than or equal to 60% then return 1; if the GC
+content is greater than 60% then return 0.
+
+
+======== PrepareBLATFile() ========
+This helper function creates the input file for BLAT in FASTA format.
+
+It reads in the dictionary AllPrimerstoBlat. It writes to a file each key-value pair in FASTA format:
+Example:
+>SEQ0
+atcgttga...atcg
+>SEQ1
+gcctacaga...aga
+
+GBK files need to be formatted in a very specific way in order to recognized by the software. The tabs and number of
+spaces need to be exact. For that reason, the program calls the insert_WS subroutine to insert X number of whitespaces
+in the GBK file.
+
+*****************************
+***     MAIN FUNCTIONS    ***
+*****************************
+
+
+======== main() ========
+The main() function calls the LoadThousandGenomeFile() function and the GeneratePrimers() function.
+In doing so, the main function performs two essential tasks:
+
+a) Load the 1000G variant file into a dictionary.
+b) generate primer pairs and selects the one that satifies all of the requirements.
+
+The main() function also closes the four aforementioned filehandles.
+
+
+======== LoadThousandGenomeFile() ========
+This function reads the thousand genomes variant file into a dictionary where the
+KEY is a string of the 'Chromosome;Genomic Position' and the VALUE is a placeholder (1).
+It returns the dictionary.
+
+This function is important because we don't want our primer pair to overlap a variant
+because later it will be difficult for our primer pair to bind.
+
+======== GeneratePrimers() ========
+This function generates primer pairs for sequences found in the alamut file.
+
+It first loops each line of the Alamut BED file. (This is a BED file with the gene and the nucleotide
+sequences of the exons we wish to target and amplify). Each line of the Alamut BED file is the following fields:
+Chromosome, Exon Start, Exon End, transcriptID, the exon number, the Gene Symbol, the strand, the sequence.
+In the loop, we split these values by tab.
+
+We initialize a dictionary called AllprimersToBlat. If the sequence of the exon is less than or equal to 1040
+then we store the values from the Alamut BED file into individual variables. We choose 1040 because that's the
+sum of the SEQUENCE_MAX_LENGTH (400) and the SEQUENCE_BUFFER (320) that flank the sequence. We want to design
+primers for sequences no more than 400 base pairs.
+
+After we have stored the variables of a single entry of the bed file, we pass these variables to callPrimer3 (see below).
+
+Calling the function callPrimer3 populates a dictionary called AllPrimerstoBlat. This dictionary
+gets passed to another function called BLATCheck().
+
+BLATCheck() returns the best matching primer pair. This primer pairs get processed:
+
+First we add the primer tag. Next, we take into account if the primer pair is on a gene that is on
+the reverse strand. Finally, the primer pair found is written to file.
+
+
+======== callPrimer3() ========
+This function calls prepareInputFileforPrimer3() in order to get the path of the Primer3 input file. See
+prepareInputFileforPrimer3() for more details on the Primer3 input file. Next, primer3
+is called on the Primer3 input file. The output from primer3 is stored as a string in the variable PrimerResults.
+
+The output is written to file for our reference but actually the variable PrimerResults is passed to the function
+GetPrimersfromPrimer3Output() where the sequences for primer3
+
+Primer3 outputs many numerical properties that describes the primers size, biochemical attributes, etc.
+
+This function doesn't return anything. The output of Primer3 is stored in a variable.
+
+======== prepareInputFileforPrimer3() ========
+This function creates the specification input file for Primer3. It returns the path to the
+specification input file.
+
+The text for the Primer3 specifications input file is written to a string, and the string is written to
+file.
+
+
+======== GetPrimersfromPrimer3Output() ========
+This function parses the Primer3 output for each of the primer pairs. We store all the primer
+pairs identified by Primer3 into a dictionary called AllprimersToBlat.
+
+The Primer3 output file is split into a list. Then the list is iterated over and each filed is stored
+in a dictionary. Once we have our dictionary, we parse the dictionary for the key PRIMER_PAIR_NUM_RETURNED.
+This integer is stored in the variable NumberOfPrimers. This is the number of primers found for the
+current exon. We use this variable to keep track of and label each primer pair.
+
+If the GC content of both the left and right primer pairs are less or equal to 60% then we store it.
+We also check that the primer is at least 20 base pairs.
+
+In this function, we make calls to the function callPrimer3(). Essentially, we pass smaller and smaller
+"chunks" or DNA sequence to callPrimer3(). eg. 750, 650, 550, 450. By doing this, we're making sure
+to get each primer pair. At the end of this function, we return AllprimersToBlat.
+
+
+======== BLATCheck() ========
+This function checks each primer pair for homology. It returns the best scoring primer pair.
+
+BLAT returns primer that have homology in the human genome. For example, a 20 base pair sequence
+of a primer may be found in one or more places in the genome. When we do this BLATCheck, we want
+to make sure that the primer pair we select is unique in the human genome and will bind.
+
+When we loop every primer pair there are two levels of checks:
+
+-> first level:
+Is there one and only one hit match for both primers?
+Are the primers on the same chromosome?
+Is there 100 percent match for BOTH primers?
+Are the primers on the same chromosome as the exon?
+Is there a Thousand Genome variant overlapping the primer pairs?
+
+-> second level:
+In the scenario that we were unable to find a primer pair on the first level,
+then we look for primer pairs on the second level:
+Is there one and only one hit match for EITHER primer pair?
+Are the primers on the same chromosome?
+Is there 100 percent match for BOTH primers?
+Are the primers on the same chromosome as the exon?
+Is there a Thousand Genome variant overlapping the primer pairs?
+
+
+If the first primer pair are NOT on the same chromosome then we loop through the COMBOS.
+
+Once we have identified THE primer pair, we return that primer pair back to GeneratePrimers().
+
+
+END
